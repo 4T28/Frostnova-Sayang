@@ -1,19 +1,34 @@
-import {
-  helpBackButton,
-  helpBugReportButton,
-  helpPaginationButton,
-} from '../../handlers/helpButtons.js';
+import { getCategoryEmbedAndPageCount, getAllCommandsEmbedAndPageCount, createHelpPaginationButtons } from '../../utils/helpMenuHelper.js';
+import { logger } from '../../utils/logger.js';
 
-const paginationIds = [
-  'help-page_first',
-  'help-page_prev',
-  'help-page_next',
-  'help-page_last',
-];
+export default {
+    name: 'help',
+    async execute(interaction, client, args) {
+        try {
+            // args format: [action, page, category]
+            const action = args[0]; // 'next' or 'back'
+            const currentPage = parseInt(args[1]) || 1;
+            const category = args[2] || 'help-all-commands';
 
-const paginationInteractions = paginationIds.map((name) => ({
-  name,
-  execute: helpPaginationButton.execute,
-}));
+            const newPage = action === 'next' ? currentPage + 1 : currentPage - 1;
 
-export default [helpBackButton, helpBugReportButton, ...paginationInteractions];
+            let result;
+            if (category === 'help-all-commands') {
+                result = await getAllCommandsEmbedAndPageCount(newPage, client);
+            } else {
+                result = await getCategoryEmbedAndPageCount(category, newPage, client);
+            }
+
+            const { embed, totalPages } = result;
+            const row = createHelpPaginationButtons(newPage, totalPages, category);
+
+            await interaction.editReply({
+                embeds: [embed],
+                components: [row]
+            });
+        } catch (error) {
+            logger.error('Error in help button handler:', error);
+            await interaction.editReply({ content: '❌ An error occurred while updating the help menu.' });
+        }
+    }
+};

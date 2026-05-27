@@ -1,111 +1,57 @@
-import { SlashCommandBuilder, PermissionFlagsBits, PermissionsBitField, ChannelType } from 'discord.js';
-import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { logEvent } from '../../utils/moderation.js';
-import { logger } from '../../utils/logger.js';
-import { getColor } from '../../config/bot.js';
-
+import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
+import { errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { logger } from '../../utils/logger.js';
+
 export default {
     data: new SlashCommandBuilder()
-    .setName("lock")
-    .setDescription(
-      "Locks the current channel (prevents @everyone from sending messages).",
-    )
-.setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
-  category: "moderation",
+        .setName("lock")
+        .setDescription("Lock the channel for all roles")
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
-  async execute(interaction, config, client) {
-    const deferSuccess = await InteractionHelper.safeDefer(interaction);
-    if (!deferSuccess) {
-      logger.warn(`Lock interaction defer failed`, {
-        userId: interaction.user.id,
-        guildId: interaction.guildId,
-        commandName: 'lock'
-      });
-      return;
-    }
+    async execute(interaction, config, client) {
+        const isPrefix = interaction._isPrefix === true;
 
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels))
-      return await InteractionHelper.safeEditReply(interaction, {
-        embeds: [
-          errorEmbed(
-            "Permission Denied",
-            "You need the `Manage Channels` permission to lock channels.",
-          ),
-        ],
-      });
-
-    const channel = interaction.channel;
-    const everyoneRole = interaction.guild.roles.everyone;
-
-    try {
-      const currentPermissions = channel.permissionsFor(everyoneRole);
-      if (currentPermissions.has(PermissionFlagsBits.SendMessages) === false) {
-        return await InteractionHelper.safeEditReply(interaction, {
-          embeds: [
-            errorEmbed(
-              "Channel Already Locked",
-              `${channel} is already locked.`,
-            ),
-          ],
-        });
-      }
-
-      await channel.permissionOverwrites.edit(
-        everyoneRole,
-        { SendMessages: false },
-{ type: 0, reason: `Channel locked by ${interaction.user.tag}` },
-      );
-
-      const lockEmbed = createEmbed(
-        "🔒 Channel Locked (Action Log)",
-        `${channel} has been locked down by ${interaction.user}.`,
-      )
-.setColor(getColor('moderation'))
-        .addFields(
-          { name: "Channel", value: channel.toString(), inline: true },
-          {
-            name: "Moderator",
-            value: `${interaction.user.tag} (${interaction.user.id})`,
-            inline: true,
-          },
-        );
-
-      await logEvent({
-        client,
-        guild: interaction.guild,
-        event: {
-          action: "Channel Locked",
-          target: channel.toString(),
-          executor: `${interaction.user.tag} (${interaction.user.id})`,
-          metadata: {
-            channelId: channel.id,
-            category: channel.parent?.name || 'None',
-            moderatorId: interaction.user.id
-          }
+        if (!isPrefix) {
+            await InteractionHelper.safeDefer(interaction);
         }
-      });
 
-      await InteractionHelper.safeEditReply(interaction, {
-        embeds: [
-          successEmbed(
-            `🔒 **Channel Locked**`,
-            `${channel} is now locked down. No one can speak here now.`,
-          ),
-        ],
-      });
-    } catch (error) {
-      logger.error('Lock command error:', error);
-      await InteractionHelper.safeEditReply(interaction, {
-        embeds: [
-          errorEmbed(
-            "An unexpected error occurred while trying to lock the channel. Check my permissions (I need 'Manage Channels').",
-          ),
-        ],
-      });
+        const channel = interaction.channel;
+        const guild = interaction.guild;
+
+        try {
+            const overwrites = channel.permissionOverwrites.cache;
+            const roleIds = [...overwrites.keys(), guild.roles.everyone.id];
+            
+            for (const id of roleIds) {
+                try {
+                    await channel.permissionOverwrites.edit(id, { SendMessages: false });
+                } catch (e) {
+                    logger.debug(`Skipping role ${id}: ${e.message}`);
+                }
+            }
+
+            // PHẢN HỒI DỰA VÀO LOẠI LỆNH
+            const embed = successEmbed("🔒 Channel locked successfully.");
+            
+            if (isPrefix) {
+                await channel.send({ embeds: [embed] });
+            } else {
+                await InteractionHelper.safeEditReply(interaction, {
+                    embeds: [embed],
+                    flags: MessageFlags.Ephemeral,
+                });
+            }
+
+        } catch (error) {
+            logger.error("Critical lock error:", error);
+            const errEmbed = errorEmbed("Error", "Failed to process lock command.");
+            
+            if (isPrefix) {
+                await channel.send({ embeds: [errEmbed] });
+            } else {
+                await InteractionHelper.safeEditReply(interaction, { embeds: [errEmbed] });
+            }
+        }
     }
-  }
 };
-
-
-

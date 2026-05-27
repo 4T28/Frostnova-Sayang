@@ -1,117 +1,132 @@
-
-
-
-
-
 import { Events } from 'discord.js';
 import { logger } from '../utils/logger.js';
-import { getLevelingConfig, getUserLevelData } from '../services/leveling.js';
-import { addXp } from '../services/xpSystem.js';
-import { checkRateLimit } from '../utils/rateLimiter.js';
+import { getGuildConfig } from '../services/guildConfig.js';
 
-const MESSAGE_XP_RATE_LIMIT_ATTEMPTS = 12;
-const MESSAGE_XP_RATE_LIMIT_WINDOW_MS = 10000;
+// Discord mention syntax: <@123>, <@!123>, <@&123>, <#123>
+const MENTION_REGEX = /^<[@#][!&]?\d+>$/;
+// Pure integer (for subcommand detection only — NOT filtered from getString)
+const INTEGER_REGEX = /^-?\d+$/;
 
 export default {
-  name: Events.MessageCreate,
-  async execute(message, client) {
-    try {
-      
-      if (message.author.bot || !message.guild) return;
+    name: Events.MessageCreate,
+    async execute(message, client) {
+        const PREFIX = "nh!";
+        if (!message.content.startsWith(PREFIX) || message.author.bot || !message.guild) return;
 
-      await handleLeveling(message, client);
-    } catch (error) {
-      logger.error('Error in messageCreate event:', error);
+        const rawArgs = message.content.slice(PREFIX.length).trim().split(/ +/);
+        const commandName = rawArgs.shift().toLowerCase();
+        if (!commandName) return;
+
+        const command = client.commands.get(commandName);
+        if (!command) return;
+
+        const args = [...rawArgs];
+
+        // Non-mention args — keep integers so "2 days", "2d", "60" all pass through getString intact
+        const nonMentionArgs = args.filter(a => !MENTION_REGEX.test(a));
+
+        // Subcommand detection: args[0] is text (not a mention, not a pure integer)
+        // e.g.  nh!todo add task  → args[0]="add"  → isSubcommand = true
+        //       nh!ban @user reason → args[0]="<@123>" → isSubcommand = false
+        //       nh!purge 10        → args[0]="10"   → isSubcommand = false
+        const firstArgIsSubcommand = !!args[0] && !MENTION_REGEX.test(args[0]) && !INTEGER_REGEX.test(args[0]);
+
+        // stringArgs: everything that is not a mention, skip subcommand token if present
+        const stringArgs = firstArgIsSubcommand ? nonMentionArgs.slice(1) : nonMentionArgs;
+
+        let _deferred = false;
+        let _replied = false;
+
+        const stripFlags = (opts) => {
+            if (!opts || typeof opts !== 'object') return opts;
+            const { flags, ephemeral, ...safe } = opts;
+            return safe;
+        };
+
+        const fakeInteraction = {
+            _isPrefix: true,
+            id: `prefix-${message.id}`,
+            createdTimestamp: message.createdTimestamp,
+            guildId: message.guild.id,
+            channelId: message.channel.id,
+            commandName,
+            type: 0,
+
+            member: message.member,
+            guild: message.guild,
+            channel: message.channel,
+            user: message.author,
+            client: client,
+            // memberPermissions for commands that check interaction.memberPermissions
+            memberPermissions: message.member.permissions,
+
+            get deferred() { return _deferred; },
+            get replied() { return _replied; },
+
+            deferReply: async (_opts) => { _deferred = true; },
+
+            reply: async (content) => {
+                const opts = stripFlags(typeof content === 'string' ? { content } : content);
+                const msg = await message.reply(opts);
+                _replied = true;
+                return msg;
+            },
+
+            editReply: async (content) => {
+                const opts = stripFlags(typeof content === 'string' ? { content } : content);
+                const msg = await message.channel.send(opts);
+                _replied = true;
+                return msg;
+            },
+
+            followUp: async (content) => {
+                const opts = stripFlags(typeof content === 'string' ? { content } : content);
+                return message.channel.send(opts);
+            },
+
+            deleteReply: async () => {},
+
+            // showModal cannot work in prefix mode — inform user to use slash command
+            showModal: async (_modal) => {
+                await message.reply('❌ This feature requires the slash command (`/`). Please use `/` version instead.');
+            },
+
+            // fetchReply returns the channel message (best approximation)
+            fetchReply: async () => message,
+
+            options: {
+                getSubcommand: () => firstArgIsSubcommand ? args[0] : null,
+
+                // Finds the first pure integer in args
+                getInteger: (_name) => {
+                    const found = args.find(a => INTEGER_REGEX.test(a));
+                    return found !== undefined ? parseInt(found, 10) : null;
+                },
+
+                // Finds the first float in args
+                getNumber: (_name) => {
+                    const found = args.find(a => /^-?[\d.]+$/.test(a) && !isNaN(parseFloat(a)));
+                    return found !== undefined ? parseFloat(found) : null;
+                },
+
+                // Returns non-mention args as a string (integers included so "2 days", "30m" etc. survive)
+                getString: (_name) => stringArgs.join(' ') || null,
+
+                getUser: (_name) => message.mentions.users.first() ?? null,
+                getMember: (_name) => message.mentions.members.first() ?? null,
+                getChannel: (_name) => message.mentions.channels.first() ?? message.channel,
+                getRole: (_name) => message.mentions.roles.first() ?? null,
+                getBoolean: (_name) => args.includes('true'),
+                getAttachment: (_name) => message.attachments.first() ?? null,
+            },
+        };
+
+        try {
+            const guildConfig = await getGuildConfig(client, message.guild.id);
+            await command.execute(fakeInteraction, guildConfig, client);
+        } catch (error) {
+            logger.error(`Prefix command "${commandName}" failed:`, error);
+            await message.channel.send('❌ Lệnh gặp lỗi. Hãy thử dùng Slash Command (/) để có đầy đủ tính năng.').catch(() => {});
+        }
     }
-  }
 };
-
-
-
-
-
-
-
-
-async function handleLeveling(message, client) {
-  try {
-    const rateLimitKey = `xp-event:${message.guild.id}:${message.author.id}`;
-    const canProcess = await checkRateLimit(rateLimitKey, MESSAGE_XP_RATE_LIMIT_ATTEMPTS, MESSAGE_XP_RATE_LIMIT_WINDOW_MS);
-    if (!canProcess) {
-      return;
-    }
-
-    const levelingConfig = await getLevelingConfig(client, message.guild.id);
-    
-    if (!levelingConfig?.enabled) {
-      return;
-    }
-
-    
-    if (levelingConfig.ignoredChannels?.includes(message.channel.id)) {
-      return;
-    }
-
-    
-    if (levelingConfig.ignoredRoles?.length > 0) {
-      const member = await message.guild.members.fetch(message.author.id).catch(() => {
-        return null;
-      });
-      if (member && member.roles.cache.some(role => levelingConfig.ignoredRoles.includes(role.id))) {
-        return;
-      }
-    }
-
-    
-    if (levelingConfig.blacklistedUsers?.includes(message.author.id)) {
-      return;
-    }
-
-    
-    if (!message.content || message.content.trim().length === 0) {
-      return;
-    }
-
-    const userData = await getUserLevelData(client, message.guild.id, message.author.id);
-    
-    
-    const cooldownTime = levelingConfig.xpCooldown || 60;
-    const now = Date.now();
-    const timeSinceLastMessage = now - (userData.lastMessage || 0);
-    
-    
-    if (timeSinceLastMessage < cooldownTime * 1000) {
-      return;
-    }
-
-    
-    const minXP = levelingConfig.xpRange?.min || levelingConfig.xpPerMessage?.min || 15;
-    const maxXP = levelingConfig.xpRange?.max || levelingConfig.xpPerMessage?.max || 25;
-
-    
-    const safeMinXP = Math.max(1, minXP);
-    const safeMaxXP = Math.max(safeMinXP, maxXP);
-
-    
-    const xpToGive = Math.floor(Math.random() * (safeMaxXP - safeMinXP + 1)) + safeMinXP;
-
-    
-    let finalXP = xpToGive;
-    if (levelingConfig.xpMultiplier && levelingConfig.xpMultiplier > 1) {
-      finalXP = Math.floor(finalXP * levelingConfig.xpMultiplier);
-    }
-
-    
-    const result = await addXp(client, message.guild, message.member, finalXP);
-    
-    if (result.success && result.leveledUp) {
-      logger.info(
-        `${message.author.tag} leveled up to level ${result.level} in ${message.guild.name}`
-      );
-    }
-  } catch (error) {
-    logger.error('Error handling leveling for message:', error);
-  }
-}
-
-

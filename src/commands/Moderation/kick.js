@@ -4,6 +4,7 @@ import { logModerationAction } from '../../utils/moderation.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
+import { PunishmentService } from '../../services/punishmentService.js';
 
 export default {
     data: new SlashCommandBuilder()
@@ -36,7 +37,15 @@ export default {
       const member = interaction.options.getMember("target");
       const reason = interaction.options.getString("reason") || "No reason provided";
 
-      
+      // Missing args guard
+      if (!targetUser) {
+        throw new TitanBotError(
+          "Missing target",
+          ErrorTypes.USER_INPUT,
+          "Please mention the user to kick.\nUsage: `nh!kick @user [reason]`"
+        );
+      }
+
       if (targetUser.id === interaction.user.id) {
         throw new TitanBotError(
           "Cannot kick self",
@@ -102,6 +111,15 @@ export default {
       });
 
       
+      PunishmentService.record({
+        guildId: interaction.guildId,
+        userId: targetUser.id,
+        moderatorId: interaction.user.id,
+        action: 'KICK',
+        reason,
+        caseId
+      }).catch(e => logger.warn('Failed to record kick punishment:', e.message));
+
       await InteractionHelper.universalReply(interaction, {
         embeds: [
           successEmbed(

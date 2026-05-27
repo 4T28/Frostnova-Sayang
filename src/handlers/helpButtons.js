@@ -1,150 +1,54 @@
-import { createEmbed } from '../utils/embeds.js';
-import { createAllCommandsMenu } from './helpSelectMenus.js';
-import { createInitialHelpMenu } from '../commands/Core/help.js';
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
-import { logger } from '../utils/logger.js';
+import { SlashCommandBuilder, ActionRowBuilder } from "discord.js";
+import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { createEmbed } from "../../utils/embeds.js";
+import { createSelectMenu } from "../../utils/components.js";
+import fs from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const COMMAND_LIST_ID = "help-command-list";
-const BACK_BUTTON_ID = "help-back-to-main";
-const PAGINATION_PREFIX = "help-page";
-const BUG_REPORT_BUTTON_ID = "help-bug-report";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-export const helpBackButton = {
-    name: BACK_BUTTON_ID,
-    async execute(interaction, client) {
-        try {
-            if (!interaction.deferred && !interaction.replied) {
-                await interaction.deferUpdate();
-            }
+const CATEGORY_SELECT_ID = "help-category-select";
+const ALL_COMMANDS_ID = "help-all-commands";
 
-            const { embeds, components } = await createInitialHelpMenu(client);
-            await interaction.editReply({
-                embeds,
-                components,
-            });
-        } catch (error) {
-            if (error?.code === 40060 || error?.code === 10062) {
-                logger.warn('Help back button interaction already acknowledged or expired.', {
-                    event: 'interaction.help.button.unavailable',
-                    errorCode: String(error.code),
-                    customId: interaction.customId,
-                    interactionId: interaction.id,
-                });
-                return;
-            }
+export async function createInitialHelpMenu(client) {
+    const commandsPath = path.join(__dirname, "../../commands");
+    const categoryDirs = (await fs.readdir(commandsPath, { withFileTypes: true }))
+        .filter((dirent) => dirent.isDirectory())
+        .map((dirent) => dirent.name)
+        .sort();
 
-            throw error;
-        }
-    },
-};
+    const options = [{ label: "📋 All Commands", description: "View all commands", value: ALL_COMMANDS_ID },
+        ...categoryDirs.map((category) => ({
+            label: `📁 ${category.charAt(0).toUpperCase() + category.slice(1)}`,
+            description: `View ${category} commands`,
+            value: category
+        }))
+    ];
 
-export const helpBugReportButton = {
-    name: BUG_REPORT_BUTTON_ID,
-    async execute(interaction, client) {
-        const githubButton = new ButtonBuilder()
-            .setLabel('🐛 Report Bug on GitHub')
-            .setStyle(ButtonStyle.Link)
-            .setURL('https://github.com/codebymitch/TitanBot/issues');
+    const embed = createEmbed({ 
+        title: `🤖 Starlight Security`,
+        description: "Welcome! Use the menu below to navigate through my commands.",
+        color: 'primary'
+    });
 
-        const bugRow = new ActionRowBuilder().addComponents(githubButton);
+    embed.setFooter({ text: "Starlight Security | Secure & Professional" });
+    embed.setTimestamp();
 
-        const bugReportEmbed = createEmbed({
-            title: '🐛 Bug Report',
-            description: 'Found a bug? Please report it on our GitHub Issues page!\n\n' +
-                '**When reporting a bug, please include:**\n' +
-                '• 📝 Detailed description of the issue\n' +
-                '• 📋 Steps to reproduce the problem\n' +
-                '• 📸 Screenshots if applicable\n' +
-                '• 💻 Your bot version and environment\n\n' +
-                'This helps us fix issues faster and more effectively!',
-            color: 'error'
-        });
-        bugReportEmbed.setFooter({
-            text: 'TitanBot Bug Reporting System',
-            iconURL: client.user.displayAvatarURL()
-        });
-        bugReportEmbed.setTimestamp();
+    const selectRow = createSelectMenu(CATEGORY_SELECT_ID, "Select a category to view commands", options);
 
-        await interaction.reply({
-            embeds: [bugReportEmbed],
-            components: [bugRow],
-            flags: MessageFlags.Ephemeral
-        });
-    },
-};
-
-export const helpReportCommand = {
-    name: COMMAND_LIST_ID,
-    categoryName: null,
-    async execute(interaction, client) {
-        
-    }
-};
-
-function getPaginationInfo(components) {
-    for (const row of components || []) {
-        for (const component of row.components || []) {
-            if (component.customId === `${PAGINATION_PREFIX}_page`) {
-                const label = component.label || '';
-                const match = label.match(/Page\s+(\d+)\s+of\s+(\d+)/i);
-                if (match) {
-                    return {
-                        currentPage: Number(match[1]),
-                        totalPages: Number(match[2]),
-                    };
-                }
-            }
-        }
-    }
-
-    return { currentPage: 1, totalPages: 1 };
+    return {
+        embeds: [embed],
+        components: [selectRow], // Chỉ để lại select menu, xóa bỏ buttonRow
+    };
 }
 
-export const helpPaginationButton = {
-    name: `${PAGINATION_PREFIX}_next`,
-    async execute(interaction, client) {
-        try {
-            if (!interaction.deferred && !interaction.replied) {
-                await interaction.deferUpdate();
-            }
-
-            const { currentPage, totalPages } = getPaginationInfo(interaction.message?.components);
-
-            let nextPage = currentPage;
-            switch (interaction.customId) {
-                case `${PAGINATION_PREFIX}_first`:
-                    nextPage = 1;
-                    break;
-                case `${PAGINATION_PREFIX}_prev`:
-                    nextPage = Math.max(1, currentPage - 1);
-                    break;
-                case `${PAGINATION_PREFIX}_next`:
-                    nextPage = Math.min(totalPages, currentPage + 1);
-                    break;
-                case `${PAGINATION_PREFIX}_last`:
-                    nextPage = totalPages;
-                    break;
-                default:
-                    nextPage = currentPage;
-                    break;
-            }
-
-            const { embeds, components } = await createAllCommandsMenu(nextPage, client);
-            await interaction.editReply({ embeds, components });
-        } catch (error) {
-            if (error?.code === 40060 || error?.code === 10062) {
-                logger.warn('Help pagination interaction already acknowledged or expired.', {
-                    event: 'interaction.help.pagination.unavailable',
-                    errorCode: String(error.code),
-                    customId: interaction.customId,
-                    interactionId: interaction.id,
-                });
-                return;
-            }
-
-            throw error;
-        }
+export default {
+    data: new SlashCommandBuilder().setName("help").setDescription("Displays the help menu"),
+    async execute(interaction, guildConfig, client) {
+        await InteractionHelper.safeDefer(interaction);
+        const { embeds, components } = await createInitialHelpMenu(client);
+        await InteractionHelper.safeEditReply(interaction, { embeds, components });
     },
 };
-
-

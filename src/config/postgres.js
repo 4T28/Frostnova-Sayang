@@ -18,6 +18,7 @@ const configuredTables = {
     verification_audit: 'verification_audit',
     temp_data: 'temp_data',
     cache_data: 'cache_data',
+    moderation_punishments: 'moderation_punishments',
 };
 
 const allowedTableIdentifiers = new Set([
@@ -37,6 +38,7 @@ const allowedTableIdentifiers = new Set([
     'verification_audit',
     'temp_data',
     'cache_data',
+    'moderation_punishments',
 ]);
 
 const validatedTables = Object.fromEntries(
@@ -49,15 +51,15 @@ const validatedTables = Object.fromEntries(
 
 
 export const pgConfig = {
-    url: process.env.POSTGRES_URL || 'postgresql://localhost:5432/titanbot',
+    url: process.env.POSTGRES_URL || process.env.DATABASE_URL || 'postgresql://localhost:5432/titanbot',
     
     options: {
         
-        host: process.env.POSTGRES_HOST || 'localhost',
-        port: parseInt(process.env.POSTGRES_PORT) || 5432,
-        database: process.env.POSTGRES_DB || 'titanbot',
-        user: process.env.POSTGRES_USER || 'postgres',
-        password: (process.env.POSTGRES_PASSWORD || '').toString(),
+        host: process.env.POSTGRES_HOST || process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT || process.env.PGPORT) || 5432,
+        database: process.env.POSTGRES_DB || process.env.PGDATABASE || 'titanbot',
+        user: process.env.POSTGRES_USER || process.env.PGUSER || 'postgres',
+        password: (process.env.POSTGRES_PASSWORD || process.env.PGPASSWORD || '').toString(),
         ssl: false,
         
         

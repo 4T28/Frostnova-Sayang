@@ -3,6 +3,7 @@ import { createEmbed, errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { getModerationCases } from '../../utils/moderation.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+
 export default {
     data: new SlashCommandBuilder()
         .setName('cases')
@@ -42,9 +43,12 @@ export default {
             return;
         }
 
+        let targetUser = null;
+        let filterType = 'all';
+
         try {
-            const filterType = interaction.options.getString('filter') || 'all';
-            const targetUser = interaction.options.getUser('user');
+            filterType = interaction.options.getString('filter') || 'all';
+            targetUser = interaction.options.getUser('user');
             const limit = interaction.options.getInteger('limit') || 10;
 
             const filters = {
@@ -55,11 +59,22 @@ export default {
 
             const cases = await getModerationCases(interaction.guild.id, filters);
 
-            if (cases.length === 0) {
-                throw new Error(targetUser 
-                    ? `No moderation cases found for ${targetUser.tag}`
-                    : `No ${filterType === 'all' ? '' : filterType} cases found in this server.`
-                );
+            if (!cases || cases.length === 0) {
+                const noCaseMessage = targetUser 
+                    ? `No cases found for user ${targetUser.tag} (ID: ${targetUser.id}).`
+                    : `No cases found for filter "${filterType === 'all' ? 'All' : filterType}" in this server.`;
+                
+                // Dùng createEmbed thường để hiện màu xanh, không bị dính chữ ❌ Error ép buộc
+                const infoEmbed = createEmbed({
+                    title: '📋 No cases found',
+                    description: noCaseMessage,
+                    color: 0x3498db
+                });
+
+                return InteractionHelper.safeEditReply(interaction, {
+                    embeds: [infoEmbed],
+                    flags: MessageFlags.Ephemeral
+                });
             }
 
             const CASES_PER_PAGE = 5;
@@ -126,7 +141,7 @@ export default {
 
             const collector = message.createMessageComponentCollector({
                 componentType: ComponentType.Button,
-time: 120000
+                time: 120000
             });
 
             collector.on('collect', async (buttonInteraction) => {
@@ -163,16 +178,19 @@ time: 120000
                         components: [disabledRow]
                     });
                 } catch (error) {
+                    logger.debug('Could not disable cases buttons (message may have been deleted):', error.message);
                 }
             });
 
         } catch (error) {
             logger.error('Error in cases command:', error);
+            
+            // ĐÃ SỬA: In thẳng chi tiết lỗi cụ thể ra Discord để bạn biết chính xác lý do gãy lệnh
             return InteractionHelper.safeEditReply(interaction, {
                 embeds: [
                     errorEmbed(
                         'System Error',
-                        'An error occurred while retrieving moderation cases. Please try again later.'
+                        `An error occurred: \`${error.message || error}\`\nPlease check this error in your database configuration.`
                     )
                 ],
                 flags: MessageFlags.Ephemeral
@@ -180,7 +198,3 @@ time: 120000
         }
     }
 };
-
-
-
-
