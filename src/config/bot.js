@@ -25,11 +25,20 @@ export const botConfig = {
     activities: [
       {
         // Text users will see (example: "Playing /help | Titan Bot").
-        name: "Made with ❤️",
+        name: "https://foxname.top/",
         // Activity type number (0 = Playing).
         type: 0, 
       },
     ],
+  },
+
+  // Default prefix for nh!ban-style commands (per-guild override in guild config).
+  prefix: process.env.BOT_PREFIX || 'nh!',
+
+  // Public brand name (help menu, footers, presence text).
+  brand: {
+    name: 'nh_starlightsercurity',
+    tagline: 'Security & moderation bot',
   },
 
   // =========================
@@ -88,7 +97,7 @@ export const botConfig = {
   embeds: {
     colors: {
       // Main brand colors.
-      primary: "#336699", 
+      primary: "#BC9EFF", 
       secondary: "#2F3136", 
 
       // Standard status colors for success/error/warning/info messages.
@@ -136,7 +145,7 @@ export const botConfig = {
     },
     footer: {
       // Default footer text used in bot embeds.
-      text: "Titan Bot",
+      text: "nh_starlightsercurity",
       // Footer icon URL (null = no icon).
       icon: null,
     },

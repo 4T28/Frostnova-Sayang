@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { Collection } from 'discord.js';
 import { logger } from '../utils/logger.js';
+import { registerPrefixAliases } from '../utils/commandAliases.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -129,6 +130,11 @@ export async function loadCommands(client) {
         }
     }
     
+    const aliasCount = registerPrefixAliases(client.commands);
+    if (aliasCount > 0) {
+        logger.info(`Registered ${aliasCount} prefix command aliases`);
+    }
+
     logger.info(`Loaded ${uniqueCommands.size} commands`);
     return client.commands;
 }
